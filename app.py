@@ -13,6 +13,18 @@ st.set_page_config(page_title="CareerGuide AI", page_icon="🎯", layout="wide")
 st.title("🎯 CareerGuide AI — Career Roadmap Generator")
 st.write("Create a personalized career roadmap based on your education, interests, and skills.")
 
+# API key drawer/sidebar
+with st.sidebar:
+    st.header("🔐 API Settings")
+    st.caption("Your Gemini API key is used only to make requests to Gemini.")
+    sidebar_api_key = st.text_input(
+        "Gemini API Key",
+        type="password",
+        placeholder="Paste your API key here",
+        help="For deployed apps, you can also store GOOGLE_API_KEY in Streamlit Secrets."
+    )
+    st.caption("Keep your API key private. Do not share it or commit it to GitHub.")
+
 # Career knowledge base from the Jupyter Notebook
 career_data = [
     {"career": "Data Scientist", "skills": ["Python", "SQL", "Statistics", "Machine Learning"],
@@ -49,13 +61,21 @@ with st.form("student_profile"):
     with col2:
         skills = st.text_input("Existing Skills", placeholder="e.g., Python Basics, HTML, CSS")
         career_goal = st.text_input("Career Goal", placeholder="e.g., Become a Data Scientist / Not Sure")
-        api_key_input = st.text_input("Gemini API Key (optional if set in .env)", type="password")
     submitted = st.form_submit_button("Generate Career Roadmap 🚀")
 
 if submitted:
-    api_key = api_key_input.strip() or os.getenv("GOOGLE_API_KEY")
+    # Streamlit Cloud: set GOOGLE_API_KEY in App settings > Secrets.
+    # Local run: set GOOGLE_API_KEY in your .env file.
+    try:
+        api_key = (
+            sidebar_api_key.strip()
+            or st.secrets.get("GOOGLE_API_KEY", "")
+            or os.getenv("GOOGLE_API_KEY", "")
+        )
+    except Exception:
+        api_key = sidebar_api_key.strip() or os.getenv("GOOGLE_API_KEY", "")
     if not api_key:
-        st.error("Gemini API key nahi mili. .env file mein GOOGLE_API_KEY set karein ya upar enter karein.")
+        st.error("Gemini API key nahi mili. Sidebar ke API Settings mein key paste karein, ya Streamlit Secrets/.env mein GOOGLE_API_KEY set karein.")
         st.stop()
     if not interests.strip() and not career_goal.strip():
         st.error("Please enter your interests or career goal.")
@@ -90,15 +110,53 @@ if submitted:
         return json.dumps(matched.iloc[0].to_dict(), indent=2)
 
     system_prompt = """
-    You are CareerGuide AI, a professional career roadmap assistant.
-    Understand the student's education, interests, skills and goals.
-    Recommend suitable career paths with clear reasoning. Use career tools whenever relevant.
-    Analyze skill gaps and create a practical step-by-step learning roadmap.
-    Suggest courses, projects, certifications and job roles.
-    Keep the response structured, realistic and student-friendly.
-    Do not guarantee jobs, salaries, or career success.
-    Clearly mention when information is not available in the database.
-    """
+You are CareerGuide AI, a professional career roadmap assistant.
+Use the student's profile and available career tools. Return clean Markdown only.
+Never return a Python list/dictionary, JSON wrapper, or escaped newline symbols.
+Use real headings, bullets, paragraphs, and Markdown tables.
+
+Follow this COMPLETE structure in the exact order:
+
+# Career Roadmap for [Student Name]
+
+## 1. Student Profile Summary
+Summarize education, interests, current skills, and career goal.
+
+## 2. Career Options
+Give 2-3 relevant career options. For each, explain the role, why it may fit,
+and key skills required. Do not guarantee outcomes or claim one career is best for everyone.
+
+## 3. Recommended Direction
+Explain a practical direction based on the profile and briefly mention alternatives.
+
+## 4. Skill Gap Analysis
+Create a table: Skill Area | Current Status | What to Learn | Priority.
+Do not claim the student has a skill unless it was listed in the profile.
+
+## 5. Personalized Learning Roadmap
+Create a 6-month table: Month | Learning Focus | Action Items | Expected Outcome.
+Make it realistic and include hands-on practice.
+
+## 6. Projects for Portfolio
+Suggest at least 3 projects. For each, give a short description and skills practiced.
+
+## 7. Courses and Learning Resources
+List useful courses/topics and established free learning platforms. Do not invent URLs.
+
+## 8. Internship and Job Preparation
+Give practical resume, GitHub/portfolio, interview, and application steps.
+
+## 9. Weekly Study Routine
+Give a realistic weekly routine the student can consistently follow.
+
+## 10. Final Action Checklist
+Provide 5-8 actionable checkboxes.
+
+## 11. Important Note
+Mention that this is informational guidance and career outcomes are not guaranteed.
+
+Keep every section specific, clear, student-friendly, and useful. Avoid repetition.
+"""
 
     student_profile = f"""
     Student Name: {student_name or 'Not provided'}
@@ -126,9 +184,19 @@ if submitted:
             response = career_agent.invoke({"messages": [{"role": "user", "content": student_profile}]})
 
         answer = response["messages"][-1].content
+
+        # Gemini/LangChain may return a list of text blocks. Extract clean text.
+        if isinstance(answer, list):
+            answer = "\n\n".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in answer
+            )
+        elif not isinstance(answer, str):
+            answer = str(answer)
+
         st.success("Career roadmap generated!")
         st.markdown(answer)
-        st.download_button("Download Roadmap (.txt)", str(answer),
+        st.download_button("Download Roadmap (.txt)", answer,
                            file_name="career_roadmap.txt", mime="text/plain")
 
         with st.expander("Agent Tool Execution Trace"):
