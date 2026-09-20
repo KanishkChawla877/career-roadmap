@@ -144,35 +144,120 @@ def create_pdf(text):
 
 # ---------------- NAVIGATION TABS ----------------
 home_tab, profile_tab, roadmap_tab, chat_tab = st.tabs([
-    "🏠 Home", "🧑‍🎓 Student Profile", "🗺️ My Roadmap", "💬 Career Chat"
+    "📊 Dashboard", "🧑‍🎓 Student Profile", "🗺️ My Roadmap", "💬 Career Chat"
 ])
 
-# ---------------- HOME ----------------
-with home_tab:
-    st.subheader("Welcome to CareerGuide AI")
-    st.write(
-        "This application helps students explore career options using their "
-        "education, academic performance, interests, and current skills."
-    )
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="small-card"><h3>🎯 Career Options</h3><p>Explore paths that match your interests.</p></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="small-card"><h3>📊 Skill Gap</h3><p>Understand which skills to develop next.</p></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="small-card"><h3>🗓️ Learning Plan</h3><p>Get a practical 6-month roadmap.</p></div>', unsafe_allow_html=True)
+# ---------------- DASHBOARD HELPERS ----------------
+def profile_text(profile):
+    return " ".join(str(v) for v in profile.values() if v).lower()
 
-    st.markdown("### How it works")
-    st.markdown("""
-    1. Open **Student Profile** and enter your details.
-    2. Add your education marks/grades (optional).
-    3. Click **Generate My Career Roadmap**.
-    4. Review, download, and discuss your roadmap in **Career Chat**.
-    """)
-    if st.session_state.roadmap:
-        st.success("A roadmap is saved in this session. Open **My Roadmap** to view it.")
+CAREER_MAP = {
+    "Data Analyst": ["data", "analytics", "analysis", "excel", "python", "statistics", "business"],
+    "Software Developer": ["software", "coding", "programming", "developer", "python", "java", "app", "web"],
+    "Cybersecurity Analyst": ["cyber", "security", "network", "ethical hacking", "linux", "security"],
+    "UI/UX Designer": ["design", "creative", "ui", "ux", "figma", "art", "visual"],
+    "AI / Machine Learning": ["ai", "machine learning", "artificial intelligence", "python", "math", "data"],
+    "Business / Marketing": ["business", "marketing", "management", "communication", "sales", "commerce"],
+    "Cloud / Network Engineer": ["cloud", "network", "linux", "aws", "azure", "infrastructure"],
+}
+
+def dashboard_insights(profile):
+    text = profile_text(profile)
+    scores = {}
+    for career, keywords in CAREER_MAP.items():
+        hits = sum(1 for word in keywords if word in text)
+        scores[career] = min(96, 48 + hits * 10)
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    # Strength indicators are inferred from information the student entered—not a validated assessment.
+    strength_groups = {
+        "Technical Interest": ["coding", "python", "software", "data", "technology", "cyber", "ai", "computer"],
+        "Analytical Thinking": ["analysis", "analytical", "math", "data", "statistics", "problem solving"],
+        "Creativity": ["creative", "design", "ui", "ux", "art", "writing", "content"],
+        "Communication": ["communication", "presentation", "leadership", "team", "speaking"],
+        "Business Mindset": ["business", "marketing", "commerce", "finance", "management"]
+    }
+    strengths = {}
+    for label, words in strength_groups.items():
+        hits = sum(1 for word in words if word in text)
+        strengths[label] = min(95, 35 + hits * 15) if hits else 25
+    interest_buckets = {
+        "Technology": ["tech", "computer", "coding", "software", "data", "cyber", "ai"],
+        "Business": ["business", "commerce", "finance", "marketing", "management"],
+        "Design": ["design", "creative", "ui", "ux", "art"],
+        "Science": ["science", "research", "biology", "physics", "chemistry"],
+        "Other": []
+    }
+    counts = {k: sum(1 for w in v if w in text) for k, v in interest_buckets.items() if k != "Other"}
+    counts["Other"] = 1
+    if sum(counts.values()) == 0:
+        counts = {"Explore more": 1}
+    return ranked, strengths, counts
+
+# ---------------- DASHBOARD ----------------
+with home_tab:
+    profile = st.session_state.profile
+    if profile:
+        ranked, strengths, interests = dashboard_insights(profile)
+        first_name = str(profile.get("Name", "Student")).split()[0]
+        st.markdown(f"""
+        <div style="padding:24px 28px;border-radius:18px;background:linear-gradient(115deg,#172554,#2563eb);color:white;margin-bottom:18px;">
+          <h2 style="color:white;margin:0;">Welcome, {first_name}! 👋</h2>
+          <p style="margin:8px 0 0 0;">Your career dashboard is based on the profile details you entered.</p>
+        </div>""", unsafe_allow_html=True)
+        a,b,c = st.columns(3)
+        with a:
+            st.metric("Career Match Estimate", f"{ranked[0][1]}%", help="A rough keyword-based indicator, not a validated career assessment or guarantee.")
+        with b:
+            st.metric("Profile", "Added", help="Your details are stored in this session only.")
+        with c:
+            st.metric("Career Paths", "7 explored")
+        st.caption("Match percentages are illustrative estimates based on text overlap in your profile—not scientifically validated scores.")
+        st.markdown("### 📈 Strengths Analysis")
+        st.caption("These indicators are inferred from your entered interests and skills. They are prompts for reflection, not test results.")
+        cols = st.columns(2)
+        for i, (label, value) in enumerate(strengths.items()):
+            with cols[i % 2]:
+                st.write(f"**{label}** · {value}%")
+                st.progress(value)
+        left, right = st.columns([1, 1.2])
+        with left:
+            st.markdown("### 🧭 Interest Mapping")
+            try:
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(4, 3))
+                ax.pie(list(interests.values()), labels=list(interests.keys()), autopct="%1.0f%%", startangle=90)
+                ax.axis("equal")
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+            except Exception:
+                st.bar_chart(interests)
+        with right:
+            st.markdown("### 🎯 Recommended Career Paths")
+            for idx, (career, score) in enumerate(ranked[:4], start=1):
+                st.markdown(f"**{idx}. {career}** · {score}% estimated alignment")
+                st.progress(score)
+        st.markdown("### ✅ Next Steps")
+        st.checkbox("Review the career paths above", key="dash_step1")
+        st.checkbox("Generate and read my personalized roadmap", key="dash_step2")
+        st.checkbox("Choose one skill to practice this week", key="dash_step3")
+        st.checkbox("Start a small portfolio project", key="dash_step4")
+        if st.session_state.roadmap:
+            st.success("Your personalized roadmap is ready—open **My Roadmap** to view or download it.")
+        else:
+            st.info("Next: open **Student Profile**, enter your details, and generate your personalized roadmap.")
     else:
-        st.info("No roadmap generated yet. Start with the Student Profile tab.")
+        st.markdown("""
+        <div style="padding:28px;border-radius:18px;background:linear-gradient(115deg,#172554,#2563eb);color:white;margin-bottom:18px;">
+          <h2 style="color:white;margin:0;">Welcome to CareerGuide AI 👋</h2>
+          <p style="margin:8px 0 0 0;">Build your personalized career path with AI-powered guidance.</p>
+        </div>""", unsafe_allow_html=True)
+        st.write("Your dashboard will show estimated career alignment, strengths indicators, interest mapping, and suggested next steps after you enter your profile.")
+        c1,c2,c3 = st.columns(3)
+        c1.info("🎯 **Career Paths**\n\nExplore roles connected to your interests.")
+        c2.info("📊 **Strengths & Interests**\n\nVisualize themes from your profile.")
+        c3.info("🗓️ **Learning Roadmap**\n\nGet a practical plan for your next steps.")
+        st.markdown("### Get started")
+        st.markdown("1. Open **Student Profile** and enter your details.\n2. Click **Generate My Career Roadmap**.\n3. Return here to see your dashboard and open **My Roadmap**.")
 
 # ---------------- STUDENT PROFILE ----------------
 with profile_tab:
