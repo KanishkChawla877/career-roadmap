@@ -50,7 +50,7 @@ with st.sidebar:
     )
     model_name = st.selectbox(
         "Gemini Model",
-        ["gemini-2.5-flash", "gemini-2.0-flash"],
+        ["gemini-3.5-flash", "gemini-2.5-flash"],
         index=0
     )
     st.divider()
