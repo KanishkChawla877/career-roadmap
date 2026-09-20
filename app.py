@@ -50,7 +50,7 @@ with st.sidebar:
     )
     model_name = st.selectbox(
         "Gemini Model",
-        ["gemini-3.5-flash", "gemini-2.5-flash"],
+        ["gemini-2.5-flash", "gemini-2.5-pro"],
         index=0
     )
     st.divider()
@@ -73,6 +73,14 @@ if "profile" not in st.session_state:
     st.session_state.profile = {}
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "weekly_progress" not in st.session_state:
+    st.session_state.weekly_progress = {}
+if "skill_gap_report" not in st.session_state:
+    st.session_state.skill_gap_report = ""
+if "resume_draft" not in st.session_state:
+    st.session_state.resume_draft = ""
+if "course_recommendations" not in st.session_state:
+    st.session_state.course_recommendations = ""
 
 # ---------------- HELPERS ----------------
 def get_api_key():
@@ -143,8 +151,10 @@ def create_pdf(text):
     return buffer.getvalue()
 
 # ---------------- NAVIGATION TABS ----------------
-home_tab, profile_tab, roadmap_tab, chat_tab = st.tabs([
-    "📊 Dashboard", "🧑‍🎓 Student Profile", "🗺️ My Roadmap", "💬 Career Chat"
+home_tab, profile_tab, roadmap_tab, chat_tab, progress_tab, compare_tab, gap_tab, resume_tab, courses_tab = st.tabs([
+    "📊 Dashboard", "🧑‍🎓 Student Profile", "🗺️ My Roadmap", "💬 Career Chat",
+    "📈 Weekly Progress", "⚖️ Compare Careers", "🧠 Skill Gap",
+    "📄 AI Resume", "🎯 Course Recommendations"
 ])
 
 # ---------------- DASHBOARD HELPERS ----------------
@@ -212,6 +222,34 @@ with home_tab:
         with c:
             st.metric("Career Paths", "7 explored")
         st.caption("Match percentages are illustrative estimates based on text overlap in your profile—not scientifically validated scores.")
+
+        # Academic performance cards: display only scores the student actually entered.
+        st.markdown("### 🎓 Academic Performance")
+        academic_items = [
+            ("Class 10th", profile.get("Class 10th Percentage", "Not provided"), 100.0, "%"),
+            ("Class 12th", profile.get("Class 12th Percentage", "Not provided"), 100.0, "%"),
+            ("Current SGPA", profile.get("Current SGPA", "Not provided"), 10.0, "/10"),
+            ("Overall CGPA", profile.get("Overall CGPA", "Not provided"), 10.0, "/10"),
+        ]
+        academic_cols = st.columns(4)
+        academic_shown = False
+        for col, (label, raw_value, scale, suffix) in zip(academic_cols, academic_items):
+            try:
+                numeric_value = float(str(raw_value).replace("%", "").strip())
+                if raw_value != "Not provided":
+                    academic_shown = True
+                    normalized = max(0.0, min(100.0, (numeric_value / scale) * 100))
+                    with col:
+                        st.metric(label, f"{numeric_value:g}{suffix}")
+                        st.progress(int(round(normalized)))
+            except (TypeError, ValueError):
+                with col:
+                    st.metric(label, "Not added")
+        if not academic_shown:
+            st.info("Academic percentages/SGPA/CGPA abhi add nahi kiye gaye. Student Profile tab mein scores enter karke **Generate My Career Roadmap** dobara click karein.")
+        else:
+            st.caption("Academic bars are normalized to a 100-point display. SGPA/CGPA are shown out of 10; missing scores are not assumed.")
+
         st.markdown("### 📈 Strengths Analysis")
         st.caption("These indicators are inferred from your entered interests and skills. They are prompts for reflection, not test results.")
         cols = st.columns(2)
@@ -458,6 +496,245 @@ Answer specifically and clearly. Do not guarantee jobs, salaries, or outcomes.
                     st.error("Gemini API quota limit reached. Check AI Studio usage and try after reset.")
                 else:
                     st.error(f"Chat request failed: {e}")
+
+
+# ---------------- WEEKLY LEARNING PROGRESS TRACKER ----------------
+with progress_tab:
+    st.subheader("📊 Weekly Learning Progress Tracker")
+    st.caption("Record your weekly learning progress. Entries are saved for this session.")
+    if not st.session_state.profile:
+        st.info("Add your Student Profile first to personalize your learning tracker.")
+    else:
+        progress_weeks = [f"Week {i}" for i in range(1, 13)]
+        selected_week = st.selectbox("Select week to update", progress_weeks)
+        with st.form("weekly_progress_form"):
+            planned = st.number_input("Planned study hours", min_value=0.0, max_value=100.0, value=5.0, step=0.5)
+            completed = st.number_input("Hours completed", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            skill_practiced = st.text_input("Skill / topic practiced", placeholder="e.g., Python, Excel, communication")
+            weekly_note = st.text_area("Weekly reflection", placeholder="What went well? What needs more practice?")
+            save_week = st.form_submit_button("Save Weekly Progress", use_container_width=True)
+        if save_week:
+            pct = min(100, round((completed / planned) * 100)) if planned > 0 else 0
+            st.session_state.weekly_progress[selected_week] = {
+                "Planned Hours": planned,
+                "Completed Hours": completed,
+                "Completion %": pct,
+                "Skill / Topic": skill_practiced,
+                "Reflection": weekly_note
+            }
+            st.success(f"{selected_week} progress saved: {pct}% of planned hours.")
+        if st.session_state.weekly_progress:
+            import pandas as pd
+            progress_df = pd.DataFrame.from_dict(st.session_state.weekly_progress, orient="index")
+            progress_df.index.name = "Week"
+            progress_df = progress_df.reindex(progress_weeks).dropna(how="all")
+            st.markdown("### Your Progress Overview")
+            st.dataframe(progress_df, use_container_width=True)
+            st.markdown("### Weekly Completion (%)")
+            st.line_chart(progress_df["Completion %"].fillna(0))
+            total_planned = progress_df["Planned Hours"].fillna(0).sum()
+            total_completed = progress_df["Completed Hours"].fillna(0).sum()
+            overall = round(total_completed / total_planned * 100) if total_planned else 0
+            p1, p2, p3 = st.columns(3)
+            p1.metric("Hours Planned", f"{total_planned:g}")
+            p2.metric("Hours Completed", f"{total_completed:g}")
+            p3.metric("Overall Completion", f"{overall}%")
+            csv_data = progress_df.to_csv().encode("utf-8")
+            st.download_button("⬇️ Download Progress CSV", csv_data, "weekly_learning_progress.csv", "text/csv")
+        else:
+            st.info("No weekly entries yet. Add your first week's progress above.")
+
+# ---------------- CAREER COMPARISON TABLE ----------------
+with compare_tab:
+    st.subheader("⚖️ Career Comparison Table")
+    st.caption("Compare career paths side by side. Alignment scores are rough keyword estimates, not validated predictions.")
+    if not st.session_state.profile:
+        st.info("Add your Student Profile first to compare career paths.")
+    else:
+        ranked, _, _ = dashboard_insights(st.session_state.profile)
+        careers_available = [name for name, _ in ranked]
+        defaults = careers_available[:3]
+        selected_careers = st.multiselect(
+            "Choose careers to compare",
+            careers_available,
+            default=defaults,
+            max_selections=5
+        )
+        career_details = {
+            "Data Analyst": ("Data, reporting, dashboards", "Excel, SQL, statistics, visualization", "Analyst / Reporting Intern"),
+            "Software Developer": ("Building apps and software", "Programming, Git, debugging, databases", "Junior Developer / Intern"),
+            "Cybersecurity Analyst": ("Protecting systems and networks", "Networking, Linux, security fundamentals", "SOC / Security Intern"),
+            "UI/UX Designer": ("Designing usable digital experiences", "Figma, user research, wireframing", "UI/UX Intern"),
+            "AI / Machine Learning": ("Building data-driven intelligent systems", "Python, math, data handling, ML basics", "ML / Data Intern"),
+            "Business / Marketing": ("Growing products and understanding customers", "Communication, research, analytics, marketing", "Marketing / Business Intern"),
+            "Cloud / Network Engineer": ("Managing cloud infrastructure and networks", "Networking, Linux, cloud fundamentals", "Cloud / Network Intern")
+        }
+        if selected_careers:
+            rows = []
+            for career in selected_careers:
+                score = dict(ranked).get(career, 0)
+                overview, skills_needed, entry_role = career_details.get(career, ("Explore role scope", "Research required skills", "Entry-level role varies"))
+                rows.append({
+                    "Career": career,
+                    "Estimated Profile Alignment": f"{score}%",
+                    "Work Focus": overview,
+                    "Skills to Build": skills_needed,
+                    "Possible Entry Role": entry_role
+                })
+            import pandas as pd
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.info("Use this table as a starting point. Actual fit depends on your interests, learning experience, local opportunities, and further exploration.")
+
+# ---------------- SKILL GAP ANALYSIS ----------------
+with gap_tab:
+    st.subheader("🧠 Personalized Skill Gap Analysis")
+    st.caption("Identify skills to build between your current profile and a career you want to explore.")
+    if not st.session_state.profile:
+        st.info("Add your Student Profile first.")
+    else:
+        target_career = st.selectbox(
+            "Target career",
+            list(CAREER_MAP.keys()),
+            key="gap_target_career"
+        )
+        if st.button("🔍 Analyze My Skill Gaps", use_container_width=True):
+            try:
+                with st.spinner("Analyzing your current skills and target career..."):
+                    llm = make_llm()
+                    prompt = f"""
+Student profile: {st.session_state.profile}
+Target career: {target_career}
+
+Create a practical skill gap analysis. Clearly separate:
+1. Skills explicitly mentioned in the profile
+2. Important skills for this career that are not yet confirmed
+3. Priority level (High/Medium/Low) with a short reason
+4. Beginner-friendly practice task for each gap
+5. A realistic 4-week action plan based on the student's study time
+
+Do not assume an unlisted skill is absent; call it "not yet specified". Avoid job or salary guarantees. Return readable Markdown with a table.
+"""
+                    result = llm.invoke([
+                        SystemMessage(content="You are a practical career skills coach. Be encouraging, specific, and realistic."),
+                        HumanMessage(content=prompt)
+                    ])
+                st.session_state.skill_gap_report = clean_response(result.content)
+            except Exception as e:
+                st.error(f"Skill gap analysis failed: {e}")
+        if st.session_state.skill_gap_report:
+            st.markdown(st.session_state.skill_gap_report)
+            st.download_button(
+                "⬇️ Download Skill Gap Report",
+                st.session_state.skill_gap_report,
+                "skill_gap_analysis.md",
+                "text/markdown"
+            )
+
+# ---------------- AI RESUME BUILDER ----------------
+with resume_tab:
+    st.subheader("📄 AI Resume Builder")
+    st.caption("Create an editable, truthful resume draft from details you provide. Review it before using.")
+    if not st.session_state.profile:
+        st.info("Add your Student Profile first.")
+    else:
+        with st.form("resume_builder_form"):
+            resume_phone_email = st.text_input("Contact details (optional)", placeholder="Email / phone — avoid sensitive details if you prefer")
+            resume_education = st.text_area("Education details", placeholder="College/school, course, year, relevant subjects")
+            resume_projects = st.text_area("Projects", placeholder="Project name, what you built, tools used, outcome")
+            resume_certificates = st.text_area("Certificates / achievements", placeholder="Certificates, awards, clubs, volunteering")
+            resume_links = st.text_input("Portfolio / GitHub / LinkedIn (optional)")
+            resume_role = st.text_input("Resume target role", placeholder="e.g., Data Analyst Intern")
+            build_resume = st.form_submit_button("✨ Generate Resume Draft", use_container_width=True)
+        if build_resume:
+            try:
+                with st.spinner("Creating your resume draft..."):
+                    llm = make_llm()
+                    prompt = f"""
+Create a clean, ATS-friendly, one-page student/fresher resume in Markdown.
+Student profile: {st.session_state.profile}
+Additional details:
+Contact: {resume_phone_email}
+Education: {resume_education}
+Projects: {resume_projects}
+Certificates/Achievements: {resume_certificates}
+Portfolio links: {resume_links}
+Target role: {resume_role}
+
+Rules:
+- Do not invent employers, dates, marks, certifications, achievements, links, metrics, or skills.
+- If a section lacks information, omit it or add a clearly marked placeholder.
+- Use concise action-oriented bullets and a simple professional format.
+- Include a short profile summary, education, skills, projects, and relevant achievements if supplied.
+- Keep it editable and avoid claiming experience the student did not provide.
+"""
+                    result = llm.invoke([
+                        SystemMessage(content="You are an ethical resume-writing assistant. Never fabricate credentials or experience."),
+                        HumanMessage(content=prompt)
+                    ])
+                st.session_state.resume_draft = clean_response(result.content)
+            except Exception as e:
+                st.error(f"Resume generation failed: {e}")
+        if st.session_state.resume_draft:
+            st.markdown(st.session_state.resume_draft)
+            st.download_button(
+                "⬇️ Download Resume Draft (.md)",
+                st.session_state.resume_draft,
+                "student_resume_draft.md",
+                "text/markdown"
+            )
+            st.caption("Check every detail and replace placeholders before submitting this resume.")
+
+# ---------------- COURSE RECOMMENDATIONS ----------------
+with courses_tab:
+    st.subheader("🎯 Personalized Course Recommendations")
+    st.caption("Get course topics and learning-platform suggestions matched to your target career.")
+    if not st.session_state.profile:
+        st.info("Add your Student Profile first.")
+    else:
+        course_target = st.selectbox(
+            "Career to prepare for",
+            list(CAREER_MAP.keys()),
+            key="course_target_career"
+        )
+        course_level = st.selectbox(
+            "Learning level",
+            ["Beginner", "Intermediate", "Experienced"],
+            key="course_level"
+        )
+        if st.button("📚 Recommend Courses & Learning Path", use_container_width=True):
+            try:
+                with st.spinner("Finding a learning path for your profile..."):
+                    llm = make_llm()
+                    prompt = f"""
+Student profile: {st.session_state.profile}
+Target career: {course_target}
+Learning level: {course_level}
+
+Recommend a staged learning path with:
+- 5-8 course topics/modules in a sensible order
+- Suitable learning platforms (for example, official documentation, Coursera, edX, freeCodeCamp, Microsoft Learn, Google learning resources)
+- Beginner-friendly practice activity after each stage
+- A suggested weekly schedule matching the student's available study time
+- Which items are typically free vs may require payment, noting that pricing can change
+Do not invent exact course titles, current prices, certificates, or URLs. If unsure, recommend a search phrase/topic rather than a specific course. Explain that recommendations should be checked for current availability.
+Return readable Markdown in a table.
+"""
+                    result = llm.invoke([
+                        SystemMessage(content="You are a student learning-path advisor. Make practical, realistic recommendations and do not fabricate course details."),
+                        HumanMessage(content=prompt)
+                    ])
+                st.session_state.course_recommendations = clean_response(result.content)
+            except Exception as e:
+                st.error(f"Course recommendations failed: {e}")
+        if st.session_state.course_recommendations:
+            st.markdown(st.session_state.course_recommendations)
+            st.download_button(
+                "⬇️ Download Course Plan",
+                st.session_state.course_recommendations,
+                "course_recommendations.md",
+                "text/markdown"
+            )
+
 
 st.divider()
 st.caption("CareerGuide AI | BCA Project | Built with Streamlit + LangChain + Gemini")
