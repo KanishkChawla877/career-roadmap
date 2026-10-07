@@ -50,7 +50,7 @@ with st.sidebar:
     )
     model_name = st.selectbox(
         "Gemini Model",
-        ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
+        ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"],
         index=0
     )
     st.divider()
@@ -103,7 +103,8 @@ def make_llm():
         model=model_name,
         google_api_key=key,
         temperature=0.3,
-        max_retries=1
+        max_retries=4,
+        timeout=60
     )
 
 def clean_response(content):
